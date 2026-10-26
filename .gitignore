@@ -1,0 +1,15 @@
+# Build artifacts
+dist/
+*.obj
+*.lib
+*.exp
+*.pdb
+*.ilk
+*.log
+
+# IDE
+.vs/
+*.user
+
+# Local test copies
+test/
