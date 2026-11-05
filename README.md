@@ -3,8 +3,9 @@
 Local split-screen co-op for **Dragon's Dogma: Dark Arisen** (Steam, PC).
 Two players, one machine, one copy of the game.
 
-> Status: **early development (Fase A)** — the loader and the memory scanner work;
-> gameplay features are being built. See [Roadmap](#roadmap).
+> Status: **Fase A verified in-game** (DDDA Steam build 2364871) — the loader, the
+> AOB scanner and live HP telemetry work. Gameplay features are being built.
+> See [Roadmap](#roadmap) and [docs/FASE-A-HALLAZGOS.md](docs/FASE-A-HALLAZGOS.md).
 
 ---
 
@@ -48,10 +49,13 @@ Expected log:
 
 ```
 === dddaDuo core Fase A ===
-signature hit at 0x00xxxxxx (section .text)
-pBase variable at 0x00xxxxxx -> player base 0x0xxxxxxx
-player base 0x0xxxxxxx | HP = 530.0
+core module: 0x666E0000
+signature hit at 0066A7C5 (section .text)
+pBase global at 018FA4BC -> player base 0E170820
+player base 0E170820 | HP = 530.0
 ```
+
+The log can be read while the game is running (opened with `_SH_DENYWR`).
 
 ### Uninstall
 
@@ -106,8 +110,8 @@ Borrá las DLLs copiadas. No se toca nada más.
 
 | Fase | Objetivo | Estado |
 |---|---|---|
-| A | Core propio: loaders + AOB scanner + telemetría de HP | ✅ compila, pendiente prueba en juego |
-| B | P2 controla el main pawn con el mando 2 (cámara compartida) | 🔜 |
+| A | Core propio: loaders + AOB scanner + telemetría de HP | ✅ verificado en juego (HP 530.0, build 2364871) |
+| B | P2 controla el main pawn con el mando 2 (cámara compartida) | 🔜 en investigación (ver docs) |
 | C | Split-screen real: 2 viewports D3D9 + segunda cámara | 🔜 |
 | D | HUD por jugador, menús, vidas compartidas | 🔜 |
 

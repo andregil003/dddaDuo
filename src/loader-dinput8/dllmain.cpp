@@ -40,7 +40,9 @@ static void EnsureCore() {
         wcscat_s(exePath, MAX_PATH, DDPUCK_CORE_DLL);
         HMODULE h = LoadLibraryW(exePath);
         if (h) {
-            g_coreInit = (PFN_DDPUCK_INIT)GetProcAddress(h, "DdpuckCoreInit");
+            FARPROC pInit = GetProcAddress(h, "DdpuckCoreInit");
+            if (!pInit) pInit = GetProcAddress(h, "_DdpuckCoreInit@4"); // x86 stdcall decoration
+            g_coreInit = (PFN_DDPUCK_INIT)pInit;
             if (g_coreInit) g_coreInit(h);
         }
     }

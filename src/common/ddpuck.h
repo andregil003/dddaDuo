@@ -12,8 +12,9 @@ typedef void (WINAPI* PFN_DDPUCK_INIT)(HMODULE hSelf);
 // Known-good offsets (community-verified, DDDA Steam 32-bit).
 // pBase is resolved at runtime by AOB signature, never hardcoded as an address.
 #define DDPUCK_OFF_PLAYER     0xA7000
-#define DDPUCK_OFF_HP         0x96C   // float, current HP
-#define DDPUCK_OFF_MAIN_PAWN  0x7F0   // main pawn struct lives beside the Arisen
+#define DDPUCK_OFF_HP         0x96C   // float, current HP (verified in-game: 530.0)
+#define DDPUCK_OFF_HP_MAX     0x970   // float, max HP (equal to HP at full health)
+#define DDPUCK_OFF_MAIN_PAWN  0x7F0   // UNVERIFIED: reads 0x00000000 on build 2364871
 
 static const BYTE DDPUCK_SIG_PBASE[] = {
     0x8B, 0x15, 0x00, 0x00, 0x00, 0x00,  // mov edx, dword ptr [pBase]

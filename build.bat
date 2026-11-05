@@ -11,7 +11,7 @@ if not exist dist mkdir dist
 
 echo.
 echo === core ===
-cl /nologo /LD /O2 /W3 /MT /EHsc src\core\ddpuck_core.cpp /link /OUT:dist\ddpuck_core.dll
+cl /nologo /LD /O2 /W3 /MT /EHsc src\core\ddpuck_core.cpp /link /DEF:src\core\ddpuck_core.def /OUT:dist\ddpuck_core.dll
 if errorlevel 1 exit /b 1
 
 echo.

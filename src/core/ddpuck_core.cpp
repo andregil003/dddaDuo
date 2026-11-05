@@ -6,6 +6,8 @@
 #include <cstdio>
 #include <cstdarg>
 #include <cstring>
+#include <process.h>
+#include <share.h>
 
 static HMODULE g_hCore = nullptr;
 static FILE*   g_log = nullptr;
@@ -13,13 +15,40 @@ static CRITICAL_SECTION g_logCs;
 static volatile LONG g_started = 0;
 
 // ---------------------------------------------------------------- logging
+static bool TryOpenLog(const wchar_t* path) {
+    // _wfsopen with _SH_DENYWR: other processes may READ the log while the game runs
+    // (plain fopen locks it exclusively, which makes live diagnostics impossible).
+    g_log = _wfsopen(path, L"a", _SH_DENYWR);
+    return g_log != nullptr;
+}
+
 static void LogOpen() {
     wchar_t exePath[MAX_PATH] = {0};
     GetModuleFileNameW(nullptr, exePath, MAX_PATH);
     wchar_t* slash = wcsrchr(exePath, L'\\');
     if (slash) *(slash + 1) = L'\0';
     wcscat_s(exePath, MAX_PATH, L"ddpuck.log");
-    _wfopen_s(&g_log, exePath, L"a, ccs=UTF-8");
+
+    // 1) Next to the executable (normal case for a game outside Program Files).
+    if (TryOpenLog(exePath)) return;
+
+    // 2) %LOCALAPPDATA%\dddaDuo - writable even when the game sits in Program Files.
+    wchar_t dir[MAX_PATH] = {0};
+    if (GetEnvironmentVariableW(L"LOCALAPPDATA", dir, MAX_PATH) > 0) {
+        wcscat_s(dir, MAX_PATH, L"\\dddaDuo");
+        CreateDirectoryW(dir, nullptr);
+        wcscat_s(dir, MAX_PATH, L"\\ddpuck.log");
+        if (TryOpenLog(dir)) return;
+    }
+
+    // 3) %TEMP%\dddaDuo - last resort, always writable for the running user.
+    wchar_t tmp[MAX_PATH] = {0};
+    if (GetTempPathW(MAX_PATH, tmp) > 0) {
+        wcscat_s(tmp, MAX_PATH, L"dddaDuo");
+        CreateDirectoryW(tmp, nullptr);
+        wcscat_s(tmp, MAX_PATH, L"\\ddpuck.log");
+        TryOpenLog(tmp);
+    }
 }
 
 static void Log(const char* fmt, ...) {
@@ -123,17 +152,30 @@ static DWORD WINAPI Worker(LPVOID) {
         return 0;
     }
 
-    BYTE** pBase = (BYTE**)(hit + 2); // operand of `mov edx, [imm32]`
+    // The instruction is `mov edx, dword ptr [imm32]`. The imm32 IS the absolute
+    // address of the pBase global (not an address relative to the instruction), so
+    // it must be read out of the instruction bytes first: hit+2 points AT the
+    // operand, it is not the operand's value.
+    DWORD varAddr = 0;
+    __try { varAddr = *(const DWORD*)(hit + 2); }
+    __except (EXCEPTION_EXECUTE_HANDLER) { varAddr = 0; }
+    if (varAddr < 0x10000) {
+        Log("ERROR: pBase operand unreadable (hit %p).", hit);
+        return 0;
+    }
+
+    BYTE** pBase = (BYTE**)varAddr;
     BYTE*  raw   = nullptr;
     __try { raw = *pBase; } __except (EXCEPTION_EXECUTE_HANDLER) { raw = nullptr; }
 
     if (!raw || (uintptr_t)raw < 0x10000) {
-        Log("ERROR: pBase pointer not resolvable yet (%p). Will retry.", raw);
+        Log("pBase global at %p not populated yet (%p). Will poll.", pBase, raw);
     } else {
-        Log("pBase variable at %p -> player base %p", pBase, raw);
+        Log("pBase global at %p -> player base %p", pBase, raw);
     }
 
     float lastHp = -9999.0f;
+    bool  warnedNotReady = false;
     for (;;) {
         BYTE* cur = nullptr;
         __try { cur = *pBase; } __except (EXCEPTION_EXECUTE_HANDLER) { cur = nullptr; }
@@ -143,8 +185,10 @@ static DWORD WINAPI Worker(LPVOID) {
             if (v.ok && v.hp != lastHp) {
                 Log("player base %p | HP = %.1f", v.base, v.hp);
                 lastHp = v.hp;
-            } else if (!v.ok) {
+                warnedNotReady = false;
+            } else if (!v.ok && !warnedNotReady) {
                 Log("waiting: player struct not populated yet (base %p)", cur);
+                warnedNotReady = true;
             }
         }
         Sleep(2000);
@@ -153,11 +197,16 @@ static DWORD WINAPI Worker(LPVOID) {
 }
 
 // ---------------------------------------------------------------- exports
+static unsigned __stdcall WorkerThunk(void*) { return Worker(nullptr); }
+
 extern "C" __declspec(dllexport) void WINAPI DdpuckCoreInit(HMODULE hSelf) {
     if (InterlockedExchange(&g_started, 1) != 0) return; // single init even with two loaders
     g_hCore = hSelf;
     InitializeCriticalSection(&g_logCs);
-    HANDLE h = CreateThread(nullptr, 0, Worker, nullptr, 0, nullptr);
+    // _beginthreadex (not CreateThread): the worker uses the CRT (fprintf), and a
+    // raw CreateThread leaves the CRT's per-thread data uninitialised, which makes
+    // the UCRT fail fast (0xC0000409) on the first formatted write.
+    HANDLE h = (HANDLE)_beginthreadex(nullptr, 0, WorkerThunk, nullptr, 0, nullptr);
     if (h) CloseHandle(h);
     // NOTE: no MessageBox here on purpose. A blocking popup inside a loader
     // call stalls the game's startup; diagnostics go to ddpuck.log instead.

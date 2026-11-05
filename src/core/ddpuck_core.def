@@ -1,0 +1,6 @@
+LIBRARY DDPUCK_CORE
+
+EXPORTS
+    ; The C++ compiler decorates a WINAPI (__stdcall) export as _DdpuckCoreInit@4 on x86.
+    ; The .def gives it a stable, undecorated name so loaders can GetProcAddress("DdpuckCoreInit").
+    DdpuckCoreInit=_DdpuckCoreInit@4
