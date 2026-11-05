@@ -105,10 +105,12 @@ static BYTE* FindPattern(const BYTE* sig, const char* mask) {
 }
 
 // ---------------------------------------------------------------- state read
-struct PlayerView {
-    BYTE*  base = nullptr;
-    float  hp = -1.0f;
-    bool   ok = false;
+struct CharView {
+    float hp = -1.0f;
+    float hpMax = -1.0f;
+    float stamina = -1.0f;
+    float staminaMax = -1.0f;
+    bool  ok = false;
 };
 
 static bool SafeReadFloat(const void* addr, float* out) {
@@ -120,16 +122,21 @@ static bool SafeReadFloat(const void* addr, float* out) {
     }
 }
 
-static PlayerView ReadPlayer(BYTE** pBase) {
-    PlayerView v;
-    if (!pBase) return v;
+// Reads one party slot. Slot 0 is the Arisen, slot 1 the main pawn.
+static CharView ReadChar(BYTE* base, int slot) {
+    CharView v;
+    if (!base) return v;
+    BYTE* p = base + DDPUCK_OFF_PLAYER + (size_t)slot * DDPUCK_STRIDE_CHARACTER;
     __try {
-        BYTE* base = *pBase;                       // *pBase = real player base
-        if (!base) return v;
-        v.base = base;
-        float hp = 0.0f;
-        if (SafeReadFloat(base + DDPUCK_OFF_PLAYER + DDPUCK_OFF_HP, &hp)) {
-            v.hp = hp;
+        float hp = 0.0f, hpMax = 0.0f, st = 0.0f, stMax = 0.0f;
+        bool a = SafeReadFloat(p + DDPUCK_OFF_HP, &hp);
+        bool b = SafeReadFloat(p + DDPUCK_OFF_HP_MAX, &hpMax);
+        bool c = SafeReadFloat(p + DDPUCK_OFF_STAMINA, &st);
+        bool d = SafeReadFloat(p + DDPUCK_OFF_STAMINA_MAX, &stMax);
+        if (a && b) {
+            v.hp = hp; v.hpMax = hpMax;
+            v.stamina = c ? st : -1.0f;
+            v.staminaMax = d ? stMax : -1.0f;
             v.ok = true;
         }
     } __except (EXCEPTION_EXECUTE_HANDLER) {
@@ -138,7 +145,25 @@ static PlayerView ReadPlayer(BYTE** pBase) {
     return v;
 }
 
+// True when any slot that matters (HP) changed since the last snapshot.
+static bool PartyChanged(const CharView* now, const CharView* before) {
+    for (int i = 0; i < DDPUCK_PARTY_SLOTS; ++i) {
+        if (now[i].hp != before[i].hp || now[i].hpMax != before[i].hpMax) return true;
+    }
+    return false;
+}
+
 // ---------------------------------------------------------------- worker
+static void LogParty(const CharView* party) {
+    static const char* kName[DDPUCK_PARTY_SLOTS] = { "arisen", "pawn1", "pawn2", "pawn3", "slot4", "slot5" };
+    for (int i = 0; i < DDPUCK_PARTY_SLOTS; ++i) {
+        if (!party[i].ok) continue;
+        if (party[i].hp <= 0.0f && party[i].hpMax <= 0.0f) continue; // empty slot
+        Log("%-7s slot %d | HP %.1f/%.1f | ST %.1f/%.1f",
+            kName[i], i, party[i].hp, party[i].hpMax, party[i].stamina, party[i].staminaMax);
+    }
+}
+
 static DWORD WINAPI Worker(LPVOID) {
     Sleep(1500); // let the game finish bringing up its heap / scene
 
@@ -174,20 +199,25 @@ static DWORD WINAPI Worker(LPVOID) {
         Log("pBase global at %p -> player base %p", pBase, raw);
     }
 
-    float lastHp = -9999.0f;
+    CharView  last[DDPUCK_PARTY_SLOTS];
     bool  warnedNotReady = false;
+    bool  firstPass = true;
     for (;;) {
         BYTE* cur = nullptr;
         __try { cur = *pBase; } __except (EXCEPTION_EXECUTE_HANDLER) { cur = nullptr; }
 
         if (cur && (uintptr_t)cur >= 0x10000) {
-            PlayerView v = ReadPlayer(pBase);
-            if (v.ok && v.hp != lastHp) {
-                Log("player base %p | HP = %.1f", v.base, v.hp);
-                lastHp = v.hp;
+            CharView now[DDPUCK_PARTY_SLOTS];
+            for (int i = 0; i < DDPUCK_PARTY_SLOTS; ++i) now[i] = ReadChar(cur, i);
+
+            if (firstPass || PartyChanged(now, last)) {
+                Log("--- party snapshot (base %p) ---", cur);
+                LogParty(now);
+                for (int i = 0; i < DDPUCK_PARTY_SLOTS; ++i) last[i] = now[i];
+                firstPass = false;
                 warnedNotReady = false;
-            } else if (!v.ok && !warnedNotReady) {
-                Log("waiting: player struct not populated yet (base %p)", cur);
+            } else if (!now[0].ok && !warnedNotReady) {
+                Log("waiting: party block not populated yet (base %p)", cur);
                 warnedNotReady = true;
             }
         }
